@@ -1,34 +1,6 @@
 import UIKit
 import PlaygroundSupport
 
-let RESOLUTION_MULTIPLIER = 2
-let WIDTH = 343 * RESOLUTION_MULTIPLIER
-assert(WIDTH.isMultiple(of: 2))
-let HEIGHT = WIDTH / 2
-
-let ROW_COUNT = 10
-let ROW_SPACING = 8.57 * CGFloat(RESOLUTION_MULTIPLIER)
-let ROW_RADIAN_INSET = 1.5 * CGFloat.pi / 180.0
-let ROW_CIRCLES = 58
-
-let CIRCLES_DIAMETER = 4.8 * CGFloat(RESOLUTION_MULTIPLIER)
-let CIRCLES_RADIUS = CIRCLES_DIAMETER / 2.0
-
-let SKIPPED_CIRCLES: Set = [0, 10, 570]
-let PARTIES: [Party] = [
-    (17, "#D93A33"),
-    (16, "#F5695E"),
-    (28, "#C4516B"),
-    (331, "#ECBD50"),
-    (30, "#DE6C35"),
-    (24, "#41B1D6"),
-    (115, "#334EA1"),
-    (9, "#313184"),
-]
-
-typealias Row = [CGPoint]
-typealias Party = (Int, String)
-
 extension UIColor {
     public convenience init?(hex: String) {
         let r, g, b: CGFloat
@@ -64,67 +36,94 @@ extension CGContext {
     }
 }
 
-func pointInCircle(of radius: CGFloat, at radian: CGFloat) -> CGPoint{
-    let x = radius * cos(radian) + CGFloat(WIDTH) / 2.0
-    let y = -(radius * sin(radian)) + CGFloat(HEIGHT)
+/// Returns the point at the given angle in radian in the circle with the given radius and center
+/// in an upper left origin coordinate system
+private func circlePoint(radius: CGFloat, center: CGPoint, radian: CGFloat) -> CGPoint {
+    let x = cos(radian) * radius + center.x
+    let y = -(sin(radian) * radius) + center.y
     
     return CGPoint(x: x, y: y)
 }
 
-func createRow(with radius: CGFloat) -> Row {
-    let start = CGFloat.pi - ROW_RADIAN_INSET
-    let end = 0.0 + ROW_RADIAN_INSET
-    let step = (start - end) / CGFloat(ROW_CIRCLES - 1)
-    var row: Row = []
+/// Returns the coordinates of the seats in an hemicycle corresponding to the French National assembly
+/// in the inside to outside and left to right order
+/// in an upper left origin coordinate system
+private func hemicyclePoints(width: CGFloat) -> [CGPoint] {
+    let height = width / 2.0
+    let rowCount = 10
+    let rowCircles = 58
+    let rowRadian = 1.5 * CGFloat.pi / 180.0
+    let rowSpacing = 8.57 / 343.0 * width
+    let circlesDiameter = 4.7 / 343.0 * width
+    let circlesCount = rowCount * rowCircles
+    let skippedPoints: Set = [0, 10, 570]
+    let center = CGPoint(x: width / 2.0, y: height)
     
-    for i in 0..<ROW_CIRCLES {
-        let radian = start - CGFloat(i) * step
-        let point = pointInCircle(of: radius, at: radian)
-        row.append(point)
-    }
-    return row
-}
-
-func createRows() -> [Row] {
-    var rows: [Row] = []
-    var radius = CGFloat(HEIGHT) - CIRCLES_RADIUS
+    var points: [CGPoint] = []
+    points.reserveCapacity(circlesCount - skippedPoints.count)
     
-    for _ in 0..<ROW_COUNT {
-        rows.append(createRow(with: radius))
-        radius -= ROW_SPACING
-    }
-    return rows.reversed()
-}
-
-func drawParty(_ party: Party, rows: [Row], seat: inout Int, in context: CGContext) {
-    let color = UIColor(hex: party.1)?.cgColor ?? UIColor(hex: "#999999")!.cgColor
-    context.setFillColor(color)
+    let radianStart = CGFloat.pi - rowRadian
+    let radianEnd = 0.0 + rowRadian
+    let radianStep = (radianStart - radianEnd) / CGFloat(rowCircles - 1)
     
-    for _ in 0..<party.0 {
-        if SKIPPED_CIRCLES.contains(seat) {
-            seat += 1
+    let radiusStart = CGFloat(rowCount + 1) * rowSpacing - circlesDiameter / 2.0
+    let radiusStep = rowSpacing
+    
+    var radian: CGFloat = radianStart
+    var i = 0
+    for _ in 0..<rowCircles {
+        var radius: CGFloat = radiusStart
+        for _ in 0..<rowCount {
+            if !skippedPoints.contains(i) {
+                let point = circlePoint(radius: radius, center: center, radian: radian)
+                points.append(point)
+            }
+            i += 1
+            radius += radiusStep
         }
-        let row = rows[seat % rows.count]
-        let point = row[seat / rows.count]
-        
-        context.addCircle(at: point, diameter: CIRCLES_DIAMETER)
-        seat += 1
+        radian -= radianStep
     }
-    context.drawPath(using: .fill)
+    return points
 }
 
-let renderer = UIGraphicsImageRenderer(size: CGSize(width: WIDTH, height: HEIGHT))
-
-let img = renderer.image { rendererContext in
-    let context = rendererContext.cgContext
-    let rows = createRows()
-    var seat = 0
+func hemicycleImage() -> UIImage {
+    let parties: [(Int, String)] = [
+        (17, "#D93A33"),
+        (16, "#F5695E"),
+        (28, "#C4516B"),
+        (331, "#ECBD50"),
+        (30, "#DE6C35"),
+        (24, "#41B1D6"),
+        (115, "#334EA1"),
+        (9, "#313184"),
+    ]
+    let width: CGFloat = 700
+    let height: CGFloat = width / 2.0
     
-    for party in PARTIES {
-        drawParty(party, rows: rows, seat: &seat, in: context)
+    let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height))
+
+    return renderer.image { rendererContext in
+        let context = rendererContext.cgContext
+        let points = hemicyclePoints(width: width)
+
+        var i = points.makeIterator()
+        for party in parties {
+            context.setFillColor(UIColor(hex: party.1)!.cgColor)
+            for _ in 0..<party.0 {
+                guard let point = i.next() else {
+                    context.drawPath(using: .fill)
+                    return
+                }
+                context.addCircle(at: point, diameter: 4.7 / 343.0 * width)
+            }
+            context.drawPath(using: .fill)
+        }
+        context.setFillColor(UIColor(hex: "#D6D6CE")!.cgColor)
+        while let point = i.next() {
+            context.addCircle(at: point, diameter: 4.7 / 343.0 * width)
+        }
+        context.drawPath(using: .fill)
     }
-    let greyCirclesCount = ROW_COUNT * ROW_CIRCLES - seat
-    drawParty((greyCirclesCount, "#999999"), rows: rows, seat: &seat, in: context)
 }
 
-PlaygroundPage.current.liveView = UIImageView(image: img)
+PlaygroundPage.current.liveView = UIImageView(image: hemicycleImage())
